@@ -1,59 +1,60 @@
 import os
 import urllib.request
-import gradio as gr
+import streamlit as st
 import torch
 import torch.nn as nn
 from torchvision import models, transforms
 from PIL import Image
 
-# 1. تحديد مسار الملف وآلية التحميل التلقائي من رابط الـ Release الخاص بك
+# 1. إعدادات الصفحة الخاصة بـ Streamlit
+st.set_page_config(page_title="مستكشف القطط الذكي", page_icon="🐱")
+st.title("مستكشف القطط الذكي 🧠🐱")
+st.write("قم برفع أي صورة، وسيقوم النموذج بتحليل مصفوفاتها والتنبؤ بالنتيجة فوراً.")
+
+# 2. تحميل ملف الأوزان تلقائياً من الـ Release إذا لم يكن موجوداً
 MODEL_PATH = 'cat_model.pth'
 if not os.path.exists(MODEL_PATH):
     url = "https://github.com/jalalalmahdi3-stack/cat-detector/releases/download/v1.0/cat_model.pth"
-    print("جاري تحميل ملف الأوزان من GitHub Releases... يرجى الانتظار")
-    urllib.request.urlretrieve(url, MODEL_PATH)
+    with st.spinner("جاري تحميل ملف الأوزان من GitHub Releases لأول مرة... يرجى الانتظار"):
+        urllib.request.urlretrieve(url, MODEL_PATH)
 
-# 2. إعادة بناء بنية نموذج ResNet18 وتعديل مخرجه ليطابق تدريبنا
-model = models.resnet18()
-num_ftrs = model.fc.in_features
-model.fc = nn.Linear(num_ftrs, 2)
+# 3. بناء هيكل النموذج وتحميل الأوزان (نحتفظ بهذا الكود داخل الذاكرة لكي لا يعيد التحميل مع كل صورة)
+@st.cache_resource
+def load_model():
+    model = models.resnet18()
+    num_ftrs = model.fc.in_features
+    model.fc = nn.Linear(num_ftrs, 2)
+    model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu')))
+    model.eval()
+    return model
 
-# تحميل الأوزان الرقمية إلى الهيكل المستدعى على معالج الـ CPU ليتوافق مع السيرفر
-model.load_state_dict(torch.load(MODEL_PATH, map_location=torch.device('cpu')))
-model.eval()
+model = load_model()
 
-# 3. دالة معالجة الصورة والتنبؤ بها
-def predict(img):
-    # تحويل الصورة لتطابق الأبعاد والمعايرة التي تدرب عليها النموذج
-    transform = transforms.Compose([
-        transforms.Resize((224, 224)),
-        transforms.ToTensor(),
-    ])
+# 4. واجهة المستخدم لرفع الصورة (Streamlit Native Uploader)
+uploaded_file = st.file_uploader("اختر صورة من جهازك...", type=["jpg", "jpeg", "png"])
+
+if uploaded_file is not None:
+    # عرض الصورة المرفوعة للمستخدم
+    image = Image.open(uploaded_file).convert('RGB')
+    st.image(image, caption='الصورة المرفوعة', use_container_width=True)
     
-    # تحويل الصورة إلى مصفوفة وإضافة بعد الدفعات (Batch)
-    img_tensor = transform(img).unsqueeze(0)
-    
-    # التنبؤ بدون حساب اشتقاقات لتوفير ذاكرة السيرفر
-    with torch.no_grad():
-        outputs = model(img_tensor)
-        _, preds = torch.max(outputs, 1)
-        
-    # الترتيب الأبجدي للمجلدات جعل cat يعبر عن الرقم 0 و not_cat يعبر عن الرقم 1
-    if preds.item() == 0:
-        return "هذه قطة بالتأكيد! 🐱"
-    else:
-        return "ليست قطة! ❌"
-
-# 4. بناء واجهة مستخدم Gradio متوافقة مع إعدادات سيرفر Streamlit
-interface = gr.Interface(
-    fn=predict,
-    inputs=gr.Image(type="pil"),
-    outputs="text",
-    title="مستكشف القطط الذكي 🧠",
-    description="قم برفع أو التقاط أي صورة، وسيقوم النموذج بتحليل مصفوفاتها والتنبؤ بالنتيجة فوراً."
-)
-
-if __name__ == "__main__":
-    # تشغيل التطبيق على المنافذ البرمجية المخصصة للاستضافة السحابية لـ Streamlit
-    interface.launch(server_name="0.0.0.0", server_port=7860)
-
+    # زر بدء التحليل والتنبؤ
+    if st.button("حلل الصورة الآن 🚀"):
+        with st.spinner("جاري معالجة البكسلات وتمريرها عبر الطبقات..."):
+            # معالجة وتجهيز الصورة للنموذج
+            transform = transforms.Compose([
+                transforms.Resize((224, 224)),
+                transforms.ToTensor(),
+            ])
+            img_tensor = transform(image).unsqueeze(0)
+            
+            # التنبؤ بالنتيجة
+            with torch.no_grad():
+                outputs = model(img_tensor)
+                _, preds = torch.max(outputs, 1)
+            
+            # عرض النتيجة النهائية بناءً على مخرج النموذج
+            if preds.item() == 0:
+                st.success("النتيجة: هذه قطة بالتأكيد! 🐱🎉")
+            else:
+                st.error("النتيجة: ليست قطة! ❌")
