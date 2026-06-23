@@ -55,4 +55,5 @@ interface = gr.Interface(
 
 if __name__ == "__main__":
     # تشغيل التطبيق على المنافذ البرمجية المخصصة للاستضافة السحابية لـ Streamlit
-    interface.launch(server_name="0.0.0.0", server_port=8501)
+    interface.launch(server_name="0.0.0.0", server_port=7860)
+
